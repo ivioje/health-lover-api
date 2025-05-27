@@ -1,32 +1,31 @@
-import os
+import json
 from typing import List
-from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic import BaseSettings, Field
 
 
 class Settings(BaseSettings):
     # Environment
-    ENVIRONMENT: str = Field(default_factory=lambda: os.getenv("ENVIRONMENT"))
-    DEBUG: bool = Field(default_factory=lambda: os.getenv("DEBUG", "True").lower() == "true")
-    
+    ENVIRONMENT: str = "development"
+    DEBUG: bool = True
+
     # Database
-    MONGODB_URL: str = Field(default_factory=lambda: os.getenv("MONGODB_URL"))
-    DATABASE_NAME: str = Field(default_factory=lambda: os.getenv("DATABASE_NAME"))
+    MONGODB_URL: str
+    DATABASE_NAME: str
 
     # API
-    API_V1_STR: str = Field(default_factory=lambda: os.getenv("API_V1_STR"))
-    PROJECT_NAME: str = Field(default_factory=lambda: os.getenv("PROJECT_NAME"))
-    PROJECT_VERSION: str = 1.0
+    API_V1_STR: str = "/api/v1"
+    PROJECT_NAME: str = "My FastAPI App"
+    PROJECT_VERSION: str = "1.0"
 
     # CORS
-    BACKEND_CORS_ORIGINS: List[str] = Field(default_factory=lambda: os.getenv("BACKEND_CORS_ORIGINS".split(","))
-    
+    BACKEND_CORS_ORIGINS: List[str] = Field(default_factory=list)
+
     # ML Models
-    ML_MODELS_PATH: str = Field(default_factory=lambda: os.getenv("ML_MODELS_PATH", "./app/ml_models"))
-    
+    ML_MODELS_PATH: str = "./app/ml_models"
+
     # Logging
-    LOG_LEVEL: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
-    
+    LOG_LEVEL: str = "INFO"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
