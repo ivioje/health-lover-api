@@ -8,196 +8,70 @@ from sklearn.decomposition import TruncatedSVD
 from scipy.sparse import csr_matrix
 import logging
 from pathlib import Path
+import pickle
+import os
 
 logger = logging.getLogger(__name__)
 
 class MLRecommendationService:
     def __init__(self):
-        self.recipes_df = None
         self.content_model = None
+        self.content_preprocessor = None
+        self.recipe_id_to_idx = None
         self.collaborative_model = None
-        self.tfidf_vectorizer = None
-        self.content_features = None
         self.user_item_matrix = None
-        self.recipe_features = None
-        self._load_data()
-        self._build_models()
-    
-    def _load_data(self):
-        """Load and preprocess the recipe data"""
-        try:
-            # Load the JSON data (in production, this could be from a database)
-            data_path = Path(__file__).parent.parent.parent.parent / "api-diets.json"
-            
-            if data_path.exists():
-                with open(data_path, 'r', encoding='utf-8') as f:
-                    recipes_data = json.load(f)
-                
-                # Convert to DataFrame
-                self.recipes_df = pd.DataFrame(recipes_data)
-                self._preprocess_data()
-                logger.info(f"Loaded {len(self.recipes_df)} recipes")
-            else:
-                # Create sample data if file not found
-                self._create_sample_data()
-                logger.warning("Recipe data file not found, using sample data")
-                
-        except Exception as e:
-            logger.error(f"Error loading data: {e}")
-            self._create_sample_data()
-    
-    def _preprocess_data(self):
-        """Preprocess the recipe data for ML models"""
-        # Handle missing values
-        self.recipes_df = self.recipes_df.fillna({
-            'calories': 0,
-            'protein_in_grams': 0,
-            'carbohydrates_in_grams': 0,
-            'fat_in_grams': 0,
-            'difficulty': 'Easy',
-            'prep_time_in_minutes': 30,
-            'cook_time_in_minutes': 30,
-            'serving': 1
-        })
-        
-        # Create combined text features for content-based filtering
-        text_features = []
-        for _, row in self.recipes_df.iterrows():
-            # Combine recipe name, ingredients, and category
-            ingredients = []
-            for i in range(1, 11):
-                ingredient = row.get(f'ingredient_{i}', '')
-                if ingredient and str(ingredient) != 'nan':
-                    ingredients.append(str(ingredient))
-            
-            category_name = ''
-            if isinstance(row.get('category'), dict):
-                category_name = row['category'].get('category', '')
-            
-            text_feature = f"{row['recipe']} {' '.join(ingredients)} {category_name} {row['difficulty']}"
-            text_features.append(text_feature)
-        
-        self.recipes_df['text_features'] = text_features
-        
-        # Create numerical features matrix
-        numerical_features = ['calories', 'protein_in_grams', 'carbohydrates_in_grams', 
-                             'fat_in_grams', 'prep_time_in_minutes', 'cook_time_in_minutes', 'serving']
-        
-        self.recipe_features = self.recipes_df[numerical_features].values
-        
-        # Normalize numerical features
-        from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler()
-        self.recipe_features = scaler.fit_transform(self.recipe_features)
-    
-    def _create_sample_data(self):
-        """Create sample data for testing"""
-        sample_data = [
-            {
-                "id": 1,
-                "recipe": "Mediterranean Quinoa Bowl",
-                "category": {"category": "Healthy Bowls"},
-                "calories": 450,
-                "protein_in_grams": 15,
-                "carbohydrates_in_grams": 65,
-                "fat_in_grams": 12,
-                "difficulty": "Easy",
-                "prep_time_in_minutes": 20,
-                "cook_time_in_minutes": 15,
-                "serving": 2,
-                "ingredient_1": "quinoa",
-                "ingredient_2": "olive oil",
-                "ingredient_3": "vegetables"
-            },
-            {
-                "id": 2,
-                "recipe": "Keto Avocado Salad",
-                "category": {"category": "Keto Recipes"},
-                "calories": 350,
-                "protein_in_grams": 8,
-                "carbohydrates_in_grams": 12,
-                "fat_in_grams": 30,
-                "difficulty": "Easy",
-                "prep_time_in_minutes": 10,
-                "cook_time_in_minutes": 0,
-                "serving": 1,
-                "ingredient_1": "avocado",
-                "ingredient_2": "cheese",
-                "ingredient_3": "greens"
-            }
-        ]
-        
-        self.recipes_df = pd.DataFrame(sample_data)
-        self._preprocess_data()
-    
-    def _build_models(self):
-        """Build content-based and collaborative filtering models"""
-        try:
-            # Content-based model using TF-IDF
-            self.tfidf_vectorizer = TfidfVectorizer(
-                max_features=5000,
-                stop_words='english',
-                ngram_range=(1, 2)
-            )
-            
-            self.content_features = self.tfidf_vectorizer.fit_transform(self.recipes_df['text_features'])
-            
-            # Create sample user-item matrix for collaborative filtering
-            self._create_user_item_matrix()
-            
-            # Build collaborative filtering model
-            if self.user_item_matrix.shape[1] > 10:  # Only if we have enough recipes
-                self.collaborative_model = TruncatedSVD(n_components=min(50, self.user_item_matrix.shape[1] - 1))
-                self.collaborative_model.fit(self.user_item_matrix)
-            
-            logger.info("ML models built successfully")
-            
-        except Exception as e:
-            logger.error(f"Error building models: {e}")
-    
-    def _create_user_item_matrix(self):
-        """Create a sample user-item interaction matrix"""
-        n_users = 1000
-        n_recipes = len(self.recipes_df)
-        
-        # Create sparse matrix with random interactions
-        np.random.seed(42)
-        interactions = []
-        
-        for user_id in range(n_users):
-            # Each user interacts with 5-15 recipes on average
-            n_interactions = np.random.poisson(8)
-            recipe_ids = np.random.choice(n_recipes, min(n_interactions, n_recipes), replace=False)
-            
-            for recipe_id in recipe_ids:
-                # Rating between 1-5
-                rating = np.random.choice([3, 4, 5], p=[0.2, 0.5, 0.3])
-                interactions.append([user_id, recipe_id, rating])
-        
-        interactions_df = pd.DataFrame(interactions, columns=['user_id', 'recipe_id', 'rating'])
-        
-        # Create user-item matrix
-        self.user_item_matrix = interactions_df.pivot_table(
-            index='user_id', 
-            columns='recipe_id', 
-            values='rating', 
-            fill_value=0
-        ).values
-        
-        self.user_item_matrix = csr_matrix(self.user_item_matrix)
-    
+        self.user_id_to_idx = None
+        self.idx_to_recipe_id = None
+        self.df = None
+        self.model_loaded = False
+        self.load_models()
+
+    def load_models(self):
+        """Load pickled models and data from ml_models directory"""
+        base_path = os.path.join(os.path.dirname(__file__), '../ml_models')
+        # Find latest model versions
+        content_models = [f for f in os.listdir(base_path) if f.startswith('content_based_model_') and f.endswith('.pkl')]
+        collab_models = [f for f in os.listdir(base_path) if f.startswith('collaborative_model_') and f.endswith('.pkl')]
+        if not content_models or not collab_models:
+            raise FileNotFoundError("No pickled models found in ml_models directory.")
+        content_models.sort(reverse=True)
+        collab_models.sort(reverse=True)
+        content_model_path = os.path.join(base_path, content_models[0])
+        collab_model_path = os.path.join(base_path, collab_models[0])
+        # Load content-based model
+        with open(content_model_path, 'rb') as f:
+            content_data = pickle.load(f)
+            self.content_model = content_data['cosine_sim']
+            self.content_preprocessor = content_data['preprocessor']
+            self.recipe_id_to_idx = content_data['recipe_id_to_idx']
+            self.df_columns = content_data['df_columns']
+        # Load collaborative model
+        with open(collab_model_path, 'rb') as f:
+            collab_data = pickle.load(f)
+            self.collaborative_model = collab_data['model']
+            self.user_item_matrix = collab_data['user_item_matrix']
+            self.user_id_to_idx = collab_data['user_id_to_idx']
+            self.idx_to_recipe_id = collab_data['idx_to_recipe_id']
+        # Load processed DataFrame
+        csvs = [f for f in os.listdir(base_path) if f.startswith('processed_dataset_') and f.endswith('.csv')]
+        if csvs:
+            csvs.sort(reverse=True)
+            import pandas as pd
+            self.df = pd.read_csv(os.path.join(base_path, csvs[0]))
+        self.model_loaded = True
+
     def get_content_based_recommendations(self, user_preferences: Dict[str, Any], n_recommendations: int = 10) -> List[Dict]:
         """Get content-based recommendations"""
         try:
-            if self.content_features is None:
+            if self.content_model is None:
                 return self._get_fallback_recommendations(n_recommendations)
             
             # Create user preference vector
             user_text = self._create_user_preference_text(user_preferences)
-            user_vector = self.tfidf_vectorizer.transform([user_text])
+            user_vector = self.content_preprocessor.transform([user_text])
             
             # Calculate similarities
-            similarities = cosine_similarity(user_vector, self.content_features)[0]
+            similarities = cosine_similarity(user_vector, self.content_model)[0]
             
             # Apply preference filters
             filtered_indices = self._apply_preference_filters(user_preferences)
@@ -208,7 +82,7 @@ class MLRecommendationService:
             
             recommendations = []
             for i, score in filtered_similarities[:n_recommendations]:
-                recipe = self.recipes_df.iloc[i].to_dict()
+                recipe = self.df.iloc[i].to_dict()
                 recipe['recommendation_score'] = float(score)
                 recipe['recommendation_type'] = 'content_based'
                 recommendations.append(recipe)
@@ -239,12 +113,12 @@ class MLRecommendationService:
             
             # Get top unrated items
             unrated_indices = np.where(user_vector == 0)[0]
-            unrated_scores = [(i, recipe_scores[i]) for i in unrated_indices if i < len(self.recipes_df)]
+            unrated_scores = [(i, recipe_scores[i]) for i in unrated_indices if i < len(self.df)]
             unrated_scores.sort(key=lambda x: x[1], reverse=True)
             
             recommendations = []
             for i, score in unrated_scores[:n_recommendations]:
-                recipe = self.recipes_df.iloc[i].to_dict()
+                recipe = self.df.iloc[i].to_dict()
                 recipe['recommendation_score'] = float(score)
                 recipe['recommendation_type'] = 'collaborative'
                 recommendations.append(recipe)
@@ -364,26 +238,26 @@ class MLRecommendationService:
     def get_similar_recipes(self, recipe_id: int, num_recommendations: int = 5) -> List[Dict]:
         """Get recipes similar to a specific recipe"""
         try:
-            if self.content_features is None:
+            if self.content_model is None:
                 return self._get_fallback_formatted_recommendations(num_recommendations)
             
             # Find the recipe index
-            recipe_indices = self.recipes_df[self.recipes_df['id'] == recipe_id].index
+            recipe_indices = self.df[self.df['id'] == recipe_id].index
             if len(recipe_indices) == 0:
                 return self._get_fallback_formatted_recommendations(num_recommendations)
             
             recipe_idx = recipe_indices[0]
             
             # Calculate similarities
-            recipe_vector = self.content_features[recipe_idx]
-            similarities = cosine_similarity([recipe_vector], self.content_features)[0]
+            recipe_vector = self.content_model[recipe_idx]
+            similarities = cosine_similarity([recipe_vector], self.content_model)[0]
             
             # Get most similar recipes (excluding the recipe itself)
             similar_indices = similarities.argsort()[::-1][1:num_recommendations + 1]
             
             recommendations = []
             for idx in similar_indices:
-                recipe = self.recipes_df.iloc[idx].to_dict()
+                recipe = self.df.iloc[idx].to_dict()
                 formatted_rec = {
                     "id": recipe['id'],
                     "recipe": recipe['recipe'],
@@ -413,21 +287,21 @@ class MLRecommendationService:
         """Get trending/popular recipes based on nutritional balance"""
         try:
             # Calculate a trending score based on balanced nutrition
-            self.recipes_df['trending_score'] = (
+            self.df['trending_score'] = (
                 # Balanced protein (20-30g gets highest score)
-                np.where(self.recipes_df['protein_in_grams'].between(20, 30), 10, 
-                        np.where(self.recipes_df['protein_in_grams'].between(15, 35), 7, 4)) +
+                np.where(self.df['protein_in_grams'].between(20, 30), 10, 
+                        np.where(self.df['protein_in_grams'].between(15, 35), 7, 4)) +
                 # Moderate calories (300-600 gets highest score)
-                np.where(self.recipes_df['calories'].between(300, 600), 10,
-                        np.where(self.recipes_df['calories'].between(200, 800), 7, 4)) +
+                np.where(self.df['calories'].between(300, 600), 10,
+                        np.where(self.df['calories'].between(200, 800), 7, 4)) +
                 # Low carbs for keto (under 20g gets highest score)
-                np.where(self.recipes_df['carbohydrates_in_grams'] < 20, 10,
-                        np.where(self.recipes_df['carbohydrates_in_grams'] < 30, 5, 2)) +
+                np.where(self.df['carbohydrates_in_grams'] < 20, 10,
+                        np.where(self.df['carbohydrates_in_grams'] < 30, 5, 2)) +
                 # Easy to make gets bonus
-                np.where(self.recipes_df['difficulty'] == 'Easy', 5, 2)
+                np.where(self.df['difficulty'] == 'Easy', 5, 2)
             )
             
-            trending_recipes = self.recipes_df.nlargest(num_recommendations, 'trending_score')
+            trending_recipes = self.df.nlargest(num_recommendations, 'trending_score')
             
             recommendations = []
             for _, recipe in trending_recipes.iterrows():
@@ -459,11 +333,11 @@ class MLRecommendationService:
     def get_available_categories(self) -> List[str]:
         """Get list of available recipe categories"""
         try:
-            if self.recipes_df is None:
+            if self.df is None:
                 return ["Breakfast Recipes", "Lunch Recipes", "Dinner Recipes", "Snack Recipes"]
             
             categories = []
-            for _, row in self.recipes_df.iterrows():
+            for _, row in self.df.iterrows():
                 category = row.get('category')
                 if isinstance(category, dict) and 'category' in category:
                     cat_name = category['category']
@@ -485,23 +359,23 @@ class MLRecommendationService:
         """Get statistics about the recommendation system"""
         try:
             stats = {
-                "total_recipes": len(self.recipes_df) if self.recipes_df is not None else 0,
+                "total_recipes": len(self.df) if self.df is not None else 0,
                 "categories": len(self.get_available_categories()),
                 "models_loaded": {
-                    "content_model": self.content_features is not None,
+                    "content_model": self.content_model is not None,
                     "collaborative_model": self.collaborative_model is not None,
                     "tfidf_vectorizer": self.tfidf_vectorizer is not None
                 },
                 "data_summary": {}
             }
             
-            if self.recipes_df is not None:
+            if self.df is not None:
                 stats["data_summary"] = {
-                    "avg_calories": float(self.recipes_df['calories'].mean()),
-                    "avg_protein": float(self.recipes_df['protein_in_grams'].mean()),
-                    "avg_carbs": float(self.recipes_df['carbohydrates_in_grams'].mean()),
-                    "avg_fat": float(self.recipes_df['fat_in_grams'].mean()),
-                    "difficulty_distribution": self.recipes_df['difficulty'].value_counts().to_dict()
+                    "avg_calories": float(self.df['calories'].mean()),
+                    "avg_protein": float(self.df['protein_in_grams'].mean()),
+                    "avg_carbs": float(self.df['carbohydrates_in_grams'].mean()),
+                    "avg_fat": float(self.df['fat_in_grams'].mean()),
+                    "difficulty_distribution": self.df['difficulty'].value_counts().to_dict()
                 }
             
             return stats
@@ -549,15 +423,15 @@ class MLRecommendationService:
     def get_content_based_recommendations(self, preferences: Dict[str, Any], num_recommendations: int = 10) -> List[Dict]:
         """Get content-based recommendations"""
         try:
-            if self.content_features is None:
+            if self.content_model is None:
                 return self._get_fallback_formatted_recommendations(num_recommendations)
             
             # Create user preference vector
             user_text = self._create_user_preference_text(preferences)
-            user_vector = self.tfidf_vectorizer.transform([user_text])
+            user_vector = self.content_preprocessor.transform([user_text])
             
             # Calculate similarities
-            similarities = cosine_similarity(user_vector, self.content_features)[0]
+            similarities = cosine_similarity(user_vector, self.content_model)[0]
             
             # Apply preference filters
             filtered_indices = self._apply_preference_filters(preferences)
@@ -568,7 +442,7 @@ class MLRecommendationService:
             
             recommendations = []
             for i, score in filtered_similarities[:num_recommendations]:
-                recipe = self.recipes_df.iloc[i].to_dict()
+                recipe = self.df.iloc[i].to_dict()
                 recipe['recommendation_score'] = float(score)
                 recipe['recommendation_type'] = 'content_based'
                 recipe['reason'] = f"Matches your {', '.join(preferences.get('health_goals', ['health']))} preferences"
@@ -600,12 +474,12 @@ class MLRecommendationService:
             
             # Get top unrated items
             unrated_indices = np.where(user_vector == 0)[0]
-            unrated_scores = [(i, recipe_scores[i]) for i in unrated_indices if i < len(self.recipes_df)]
+            unrated_scores = [(i, recipe_scores[i]) for i in unrated_indices if i < len(self.df)]
             unrated_scores.sort(key=lambda x: x[1], reverse=True)
             
             recommendations = []
             for i, score in unrated_scores[:num_recommendations]:
-                recipe = self.recipes_df.iloc[i].to_dict()
+                recipe = self.df.iloc[i].to_dict()
                 recipe['recommendation_score'] = float(score)
                 recipe['recommendation_type'] = 'collaborative'
                 recipe['reason'] = 'Recommended based on similar users\' preferences'
@@ -666,3 +540,6 @@ class MLRecommendationService:
         except Exception as e:
             logger.error(f"Error in hybrid recommendations: {e}")
             return self._get_fallback_formatted_recommendations(num_recommendations)
+
+# Create a singleton instance for import in main.py
+ml_service = MLRecommendationService()

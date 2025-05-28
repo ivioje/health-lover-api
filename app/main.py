@@ -5,6 +5,7 @@ import logging
 import sys
 from pathlib import Path
 import uvicorn
+from fastapi.responses import JSONResponse
 
 
 # Add the app directory to Python path
@@ -23,6 +24,7 @@ logging.basicConfig(
         logging.FileHandler("app.log")
     ]
 )
+logging.getLogger("watchfiles").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Health Lover Recommendation API...")
     try:
-        await ml_service.load_models()
+        ml_service.load_models()
         logger.info("ML models loaded")
         logger.info("Health Lover Recommendation API started successfully")
     except Exception as e:
@@ -41,12 +43,8 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Shutting down Health Lover Recommendation API...")
-    try:
-        await ml_service.save_models()
-        logger.info("ML models saved")
-        logger.info("Health Lover Recommendation API shutdown complete")
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+    # No save_models method; just log shutdown complete
+    logger.info("Health Lover Recommendation API shutdown complete")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -122,55 +120,73 @@ async def api_info():
         }
     }
 
-# --- New endpoints for frontend interaction ---
+# --- endpoints for frontend interaction ---
 
 @app.post("/api/v1/user/view")
 async def user_view_diet(user_id: str = Body(...), diet_id: str = Body(...)):
     """Receive notification that a user viewed a diet."""
-    # TODO: Implement logic to update view history for collaborative filtering
+    
+    logger.info(f"User {user_id} viewed diet {diet_id}")
     return {"message": f"User {user_id} viewed diet {diet_id}"}
 
 @app.post("/api/v1/user/like")
 async def user_like_diet(user_id: str = Body(...), diet_id: str = Body(...)):
     """Receive notification that a user liked a diet."""
-    # TODO: Implement logic to update like history for collaborative filtering
+    
+    logger.info(f"User {user_id} liked diet {diet_id}")
     return {"message": f"User {user_id} liked diet {diet_id}"}
 
 @app.post("/api/v1/user/add-to-folder")
 async def user_add_diet_to_folder(user_id: str = Body(...), diet_id: str = Body(...), folder_name: str = Body(...)):
     """Receive notification that a user added a diet to a folder."""
-    # TODO: Implement logic to update folder for collaborative filtering
+    
+    logger.info(f"User {user_id} added diet {diet_id} to folder {folder_name}")
     return {"message": f"User {user_id} added diet {diet_id} to folder {folder_name}"}
 
 @app.get("/api/v1/recommend/popular")
 async def get_popular_diets():
     """Get popular diets for collaborative filtering."""
-    # TODO: Implement logic to return popular diets
-    return {"popular_diets": []}
+    # Use the ML service to get trending/popular diets
+    try:
+        popular_diets = ml_service.get_trending_recipes(num_recommendations=10)
+        return {"popular_diets": popular_diets}
+    except Exception as e:
+        logger.error(f"Error getting popular diets: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get popular diets")
 
 @app.post("/api/v1/recommend/similar")
-async def get_similar_diets(diet_id: str = Body(...)):
+async def get_similar_diets(diet_id: int = Body(...)):
     """Get similar diets for a given diet (content-based filtering)."""
-    # TODO: Implement logic to return similar diets
-    return {"similar_diets": []}
+    try:
+        similar_diets = ml_service.get_similar_recipes(recipe_id=diet_id, num_recommendations=5)
+        return {"similar_diets": similar_diets}
+    except Exception as e:
+        logger.error(f"Error getting similar diets: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get similar diets")
 
 # Error handlers
 @app.exception_handler(404)
 async def not_found_handler(request, exc):
-    return {
-        "error": "Not Found",
-        "message": "The requested resource was not found",
-        "status_code": 404
-    }
+    return JSONResponse(
+        content={
+            "error": "Not Found",
+            "message": "The requested resource was not found",
+            "status_code": 404
+        },
+        status_code=404
+    )
 
 @app.exception_handler(500)
 async def internal_error_handler(request, exc):
     logger.error(f"Internal server error: {exc}")
-    return {
-        "error": "Internal Server Error",
-        "message": "An unexpected error occurred",
-        "status_code": 500
-    }
+    return JSONResponse(
+        content={
+            "error": "Internal Server Error",
+            "message": "An unexpected error occurred",
+            "status_code": 500
+        },
+        status_code=500
+    )
 
 if __name__ == "__main__":
     uvicorn.run(
