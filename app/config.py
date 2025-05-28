@@ -1,16 +1,13 @@
 import json
 from typing import List
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings
+from pydantic import Field
 
 
 class Settings(BaseSettings):
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
-
-    # Database
-    MONGODB_URL: str
-    DATABASE_NAME: str
 
     # API
     API_V1_STR: str = "/api/v1"

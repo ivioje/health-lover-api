@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
@@ -11,7 +11,6 @@ import uvicorn
 sys.path.append(str(Path(__file__).parent.parent))
 
 from app.config import settings
-from app.database import connect_to_mongo, close_mongo_connection
 from app.services.ml_service import ml_service
 from app.routers import recommendations
 
@@ -32,34 +31,20 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
     logger.info("Starting Health Lover Recommendation API...")
-    
     try:
-        await connect_to_mongo()
-        logger.info("Database connection established")
-        
         await ml_service.load_models()
         logger.info("ML models loaded")
-        
         logger.info("Health Lover Recommendation API started successfully")
-        
     except Exception as e:
         logger.error(f"Error during startup: {e}")
         raise
-    
     yield
-    
     # Shutdown
     logger.info("Shutting down Health Lover Recommendation API...")
-    
     try:
-        await close_mongo_connection()
-        logger.info("Database connection closed")
-        
         await ml_service.save_models()
         logger.info("ML models saved")
-        
         logger.info("Health Lover Recommendation API shutdown complete")
-        
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
 
@@ -101,27 +86,16 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     try:
-        from app.database import db
-        if db.client is None:
-            raise Exception("Database not connected")
-        
-        # Ping database
-        await db.client.admin.command('ping')
-        
-        # Check ML models
         models_status = {
             "models_loaded": ml_service.model_loaded,
             "content_model": ml_service.cosine_sim_matrix is not None,
             "collaborative_model": ml_service.collaborative_model is not None
         }
-        
         return {
             "status": "healthy",
-            "database": "connected",
             "ml_models": models_status,
             "environment": settings.ENVIRONMENT
         }
-        
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
@@ -147,6 +121,38 @@ async def api_info():
             "info": f"{settings.API_V1_STR}/info"
         }
     }
+
+# --- New endpoints for frontend interaction ---
+
+@app.post("/api/v1/user/view")
+async def user_view_diet(user_id: str = Body(...), diet_id: str = Body(...)):
+    """Receive notification that a user viewed a diet."""
+    # TODO: Implement logic to update view history for collaborative filtering
+    return {"message": f"User {user_id} viewed diet {diet_id}"}
+
+@app.post("/api/v1/user/like")
+async def user_like_diet(user_id: str = Body(...), diet_id: str = Body(...)):
+    """Receive notification that a user liked a diet."""
+    # TODO: Implement logic to update like history for collaborative filtering
+    return {"message": f"User {user_id} liked diet {diet_id}"}
+
+@app.post("/api/v1/user/add-to-folder")
+async def user_add_diet_to_folder(user_id: str = Body(...), diet_id: str = Body(...), folder_name: str = Body(...)):
+    """Receive notification that a user added a diet to a folder."""
+    # TODO: Implement logic to update folder for collaborative filtering
+    return {"message": f"User {user_id} added diet {diet_id} to folder {folder_name}"}
+
+@app.get("/api/v1/recommend/popular")
+async def get_popular_diets():
+    """Get popular diets for collaborative filtering."""
+    # TODO: Implement logic to return popular diets
+    return {"popular_diets": []}
+
+@app.post("/api/v1/recommend/similar")
+async def get_similar_diets(diet_id: str = Body(...)):
+    """Get similar diets for a given diet (content-based filtering)."""
+    # TODO: Implement logic to return similar diets
+    return {"similar_diets": []}
 
 # Error handlers
 @app.exception_handler(404)
