@@ -59,9 +59,9 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -86,7 +86,7 @@ async def health_check():
     try:
         models_status = {
             "models_loaded": ml_service.model_loaded,
-            "content_model": ml_service.cosine_sim_matrix is not None,
+            "content_model": ml_service.content_model is not None,
             "collaborative_model": ml_service.collaborative_model is not None
         }
         return {
@@ -125,21 +125,21 @@ async def api_info():
 @app.post("/api/v1/user/view")
 async def user_view_diet(user_id: str = Body(...), diet_id: str = Body(...)):
     """Receive notification that a user viewed a diet."""
-    
+    # For now, just acknowledge the event. In production, you would update an in-memory or persistent store.
     logger.info(f"User {user_id} viewed diet {diet_id}")
     return {"message": f"User {user_id} viewed diet {diet_id}"}
 
 @app.post("/api/v1/user/like")
 async def user_like_diet(user_id: str = Body(...), diet_id: str = Body(...)):
     """Receive notification that a user liked a diet."""
-    
+    # For now, just acknowledge the event. In production, you would update an in-memory or persistent store.
     logger.info(f"User {user_id} liked diet {diet_id}")
     return {"message": f"User {user_id} liked diet {diet_id}"}
 
 @app.post("/api/v1/user/add-to-folder")
 async def user_add_diet_to_folder(user_id: str = Body(...), diet_id: str = Body(...), folder_name: str = Body(...)):
     """Receive notification that a user added a diet to a folder."""
-    
+    # For now, just acknowledge the event. In production, you would update an in-memory or persistent store.
     logger.info(f"User {user_id} added diet {diet_id} to folder {folder_name}")
     return {"message": f"User {user_id} added diet {diet_id} to folder {folder_name}"}
 

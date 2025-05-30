@@ -71,8 +71,8 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "recommendation",
-        "model_loaded": ml_service.recipes_df is not None,
-        "total_recipes": len(ml_service.recipes_df) if ml_service.recipes_df is not None else 0
+        "model_loaded": ml_service.df is not None,
+        "total_recipes": len(ml_service.df) if ml_service.df is not None else 0
     }
 
 @router.post("/content-based", response_model=RecommendationResponse)

@@ -96,68 +96,57 @@ class MLRecommendationService:
     def get_collaborative_recommendations(self, user_id: str, n_recommendations: int = 10) -> List[Dict]:
         """Get collaborative filtering recommendations"""
         try:
-            if self.collaborative_model is None:
-                return self._get_fallback_recommendations(n_recommendations)
-            
+            if self.collaborative_model is None or self.user_item_matrix is None or self.df is None or self.idx_to_recipe_id is None:
+                return self._get_fallback_formatted_recommendations(n_recommendations)
             # For new users, use popularity-based recommendations
             user_id_int = hash(user_id) % self.user_item_matrix.shape[0]
-            
-            # Get user vector
-            user_vector = self.user_item_matrix[user_id_int].toarray().flatten()
-            
-            # Transform to latent space
-            user_latent = self.collaborative_model.transform([user_vector])
-            
-            # Get recommendations
-            recipe_scores = self.collaborative_model.inverse_transform(user_latent)[0]
-            
-            # Get top unrated items
-            unrated_indices = np.where(user_vector == 0)[0]
-            unrated_scores = [(i, recipe_scores[i]) for i in unrated_indices if i < len(self.df)]
-            unrated_scores.sort(key=lambda x: x[1], reverse=True)
-            
+            recommended = self.collaborative_model.recommend(user_id_int, self.user_item_matrix, N=n_recommendations)
             recommendations = []
-            for i, score in unrated_scores[:n_recommendations]:
-                recipe = self.df.iloc[i].to_dict()
-                recipe['recommendation_score'] = float(score)
-                recipe['recommendation_type'] = 'collaborative'
-                recommendations.append(recipe)
-            
-            return recommendations
-            
+            for idx, score in recommended:
+                recipe_id = self.idx_to_recipe_id.get(idx)
+                if recipe_id is not None:
+                    recipe_row = self.df[self.df['id'] == recipe_id]
+                    if not recipe_row.empty:
+                        recipe = recipe_row.iloc[0].to_dict()
+                        recipe['recommendation_score'] = float(score)
+                        recipe['recommendation_type'] = 'collaborative'
+                        recipe['reason'] = "Recommended based on similar users' preferences"
+                        recommendations.append(recipe)
+            return self._format_recommendations_for_api(recommendations)
         except Exception as e:
             logger.error(f"Error in collaborative recommendations: {e}")
-            return self._get_fallback_recommendations(n_recommendations)
+            return self._get_fallback_formatted_recommendations(n_recommendations)
     
-    def get_hybrid_recommendations(self, user_id: str, user_preferences: Dict[str, Any], n_recommendations: int = 10) -> List[Dict]:
+    def get_hybrid_recommendations(self, user_id: str, preferences: Dict[str, Any], num_recommendations: int = 10, content_weight: float = 0.6) -> List[Dict]:
         """Get hybrid recommendations combining content-based and collaborative filtering"""
         try:
             # Get both types of recommendations
-            content_recs = self.get_content_based_recommendations(user_preferences, n_recommendations * 2)
-            collab_recs = self.get_collaborative_recommendations(user_id, n_recommendations * 2)
+            content_recs = self.get_content_based_recommendations(preferences, num_recommendations * 2)
+            collab_recs = self.get_collaborative_recommendations(user_id, num_recommendations * 2)
             
             # Combine and weight the recommendations
             recipe_scores = {}
             
-            # Weight content-based recommendations (60% weight)
+            # Weight content-based recommendations using content_weight parameter
             for rec in content_recs:
                 recipe_id = rec['id']
                 recipe_scores[recipe_id] = {
                     'recipe': rec,
-                    'content_score': rec['recommendation_score'] * 0.6,
+                    'content_score': rec['recommendation_score'] * content_weight,
                     'collab_score': 0
                 }
             
-            # Add collaborative recommendations (40% weight)
+            # Add collaborative recommendations using (1 - content_weight)
+            collab_weight = 1.0 - content_weight
             for rec in collab_recs:
                 recipe_id = rec['id']
                 if recipe_id in recipe_scores:
-                    recipe_scores[recipe_id]['collab_score'] = rec['recommendation_score'] * 0.4
+                    recipe_scores[recipe_id]['collab_score'] = rec['recommendation_score'] * collab_weight
                 else:
                     recipe_scores[recipe_id] = {
                         'recipe': rec,
                         'content_score': 0,
-                        'collab_score': rec['recommendation_score'] * 0.4
+                        'collab_score': rec['recommendation_score'] * collab_weight
                     }
             
             # Calculate final scores and sort
@@ -171,18 +160,18 @@ class MLRecommendationService:
             
             final_recommendations.sort(key=lambda x: x['recommendation_score'], reverse=True)
             
-            return final_recommendations[:n_recommendations]
+            return final_recommendations[:num_recommendations]
             
         except Exception as e:
             logger.error(f"Error in hybrid recommendations: {e}")
-            return self._get_fallback_recommendations(n_recommendations)
+            return self._get_fallback_recommendations(num_recommendations)
     
     def get_personalized_recommendations(self, user_id: str, preferences: Dict[str, Any], 
                                        liked_recipes: List[int], num_recommendations: int = 10) -> List[Dict]:
         """Get personalized recommendations based on user preferences and liked recipes"""
         try:
             # Start with hybrid recommendations
-            recommendations = self.get_hybrid_recommendations(user_id, preferences, num_recommendations * 2)
+            recommendations = self.get_hybrid_recommendations(user_id, preferences, num_recommendations * 2, content_weight=0.7)
             
             # If user has liked recipes, use them to boost similar recipes
             if liked_recipes:
@@ -213,7 +202,7 @@ class MLRecommendationService:
                 formatted_rec = {
                     "id": rec['id'],
                     "recipe": rec['recipe'],
-                    "category": rec.get('category', {}).get('category') if isinstance(rec.get('category'), dict) else rec.get('category'),
+                    "category": rec.get('category_name', {}).get('category') if isinstance(rec.get('category_name'), dict) else rec.get('category_name'),
                     "difficulty": rec.get('difficulty'),
                     "prep_time_in_minutes": rec.get('prep_time_in_minutes'),
                     "cook_time_in_minutes": rec.get('cook_time_in_minutes'),
@@ -261,7 +250,7 @@ class MLRecommendationService:
                 formatted_rec = {
                     "id": recipe['id'],
                     "recipe": recipe['recipe'],
-                    "category": recipe.get('category', {}).get('category') if isinstance(recipe.get('category'), dict) else recipe.get('category'),
+                    "category": recipe.get('category_name', {}).get('category') if isinstance(recipe.get('category_name'), dict) else recipe.get('category_name'),
                     "difficulty": recipe.get('difficulty'),
                     "prep_time_in_minutes": recipe.get('prep_time_in_minutes'),
                     "cook_time_in_minutes": recipe.get('cook_time_in_minutes'),
@@ -308,7 +297,7 @@ class MLRecommendationService:
                 formatted_rec = {
                     "id": recipe['id'],
                     "recipe": recipe['recipe'],
-                    "category": recipe.get('category', {}).get('category') if isinstance(recipe.get('category'), dict) else recipe.get('category'),
+                    "category": recipe.get('category_name', {}).get('category') if isinstance(recipe.get('category_name'), dict) else recipe.get('category_name'),
                     "difficulty": recipe.get('difficulty'),
                     "prep_time_in_minutes": recipe.get('prep_time_in_minutes'),
                     "cook_time_in_minutes": recipe.get('cook_time_in_minutes'),
@@ -392,7 +381,7 @@ class MLRecommendationService:
             formatted_rec = {
                 "id": rec['id'],
                 "recipe": rec['recipe'],
-                "category": rec.get('category', {}).get('category') if isinstance(rec.get('category'), dict) else rec.get('category'),
+                "category": rec.get('category_name', {}).get('category') if isinstance(rec.get('category_name'), dict) else rec.get('category_name'),
                 "difficulty": rec.get('difficulty'),
                 "prep_time_in_minutes": rec.get('prep_time_in_minutes'),
                 "cook_time_in_minutes": rec.get('cook_time_in_minutes'),
@@ -418,6 +407,27 @@ class MLRecommendationService:
         except Exception as e:
             logger.error(f"Error in fallback formatted recommendations: {e}")
             return []
+
+    def _get_fallback_recommendations(self, num_recommendations: int) -> list:
+        """Return fallback recommendations if model/data is unavailable."""
+        if self.df is not None and len(self.df) > 0:
+            fallback = self.df.sample(n=min(num_recommendations, len(self.df))).to_dict(orient='records')
+            for rec in fallback:
+                rec['recommendation_score'] = 0.5
+                rec['recommendation_type'] = 'fallback'
+                rec['reason'] = 'Fallback recommendation'
+            return fallback
+        return []
+
+    def _create_user_preference_text(self, preferences: dict) -> str:
+        """Convert user preferences into a string for vectorization."""
+        text = []
+        for key, value in preferences.items():
+            if isinstance(value, list):
+                text.extend(value)
+            else:
+                text.append(str(value))
+        return ' '.join(text)
 
     # Update existing methods to return formatted recommendations
     def get_content_based_recommendations(self, preferences: Dict[str, Any], num_recommendations: int = 10) -> List[Dict]:
@@ -457,36 +467,23 @@ class MLRecommendationService:
     def get_collaborative_recommendations(self, user_id: str, num_recommendations: int = 10) -> List[Dict]:
         """Get collaborative filtering recommendations"""
         try:
-            if self.collaborative_model is None:
+            if self.collaborative_model is None or self.user_item_matrix is None or self.df is None or self.idx_to_recipe_id is None:
                 return self._get_fallback_formatted_recommendations(num_recommendations)
-            
             # For new users, use popularity-based recommendations
             user_id_int = hash(user_id) % self.user_item_matrix.shape[0]
-            
-            # Get user vector
-            user_vector = self.user_item_matrix[user_id_int].toarray().flatten()
-            
-            # Transform to latent space
-            user_latent = self.collaborative_model.transform([user_vector])
-            
-            # Get recommendations
-            recipe_scores = self.collaborative_model.inverse_transform(user_latent)[0]
-            
-            # Get top unrated items
-            unrated_indices = np.where(user_vector == 0)[0]
-            unrated_scores = [(i, recipe_scores[i]) for i in unrated_indices if i < len(self.df)]
-            unrated_scores.sort(key=lambda x: x[1], reverse=True)
-            
+            recommended = self.collaborative_model.recommend(user_id_int, self.user_item_matrix, N=num_recommendations)
             recommendations = []
-            for i, score in unrated_scores[:num_recommendations]:
-                recipe = self.df.iloc[i].to_dict()
-                recipe['recommendation_score'] = float(score)
-                recipe['recommendation_type'] = 'collaborative'
-                recipe['reason'] = 'Recommended based on similar users\' preferences'
-                recommendations.append(recipe)
-            
+            for idx, score in recommended:
+                recipe_id = self.idx_to_recipe_id.get(idx)
+                if recipe_id is not None:
+                    recipe_row = self.df[self.df['id'] == recipe_id]
+                    if not recipe_row.empty:
+                        recipe = recipe_row.iloc[0].to_dict()
+                        recipe['recommendation_score'] = float(score)
+                        recipe['recommendation_type'] = 'collaborative'
+                        recipe['reason'] = "Recommended based on similar users' preferences"
+                        recommendations.append(recipe)
             return self._format_recommendations_for_api(recommendations)
-            
         except Exception as e:
             logger.error(f"Error in collaborative recommendations: {e}")
             return self._get_fallback_formatted_recommendations(num_recommendations)

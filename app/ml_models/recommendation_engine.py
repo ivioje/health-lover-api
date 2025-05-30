@@ -7,8 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/10JTMO-gYtChcM0nqc0TEAjfaqK9P1kvq
 """
 
-pip install implicit
-
 # Import libraries
 import pandas as pd
 import json
